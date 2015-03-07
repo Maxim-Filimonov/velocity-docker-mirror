@@ -71,7 +71,6 @@ log = loglevel.createPackageLogger('[docker-mirror]', process.env.VELOCITY_DEBUG
           env: _.defaults(environment, process.env)
         }
       };
-      DEBUG && console.log('[velocity-node-mirror] Mirror container requested with args ',spawnArgs);
       mirrorChild.spawn(spawnArgs);
 
       DEBUG && console.log('[velocity-node-mirror] Mirror container created with name', mirrorChild.name);
@@ -139,25 +138,52 @@ log = loglevel.createPackageLogger('[docker-mirror]', process.env.VELOCITY_DEBUG
       },
       isRunning: function(err, callback) {
         var container = docker.getContainer(name);
+
+        if(this.isCreated()) {
+          try {
+            var data = Meteor.wrapAsync(container.inspect, container)();
+            DEBUG && console.log("[docker-mirror] Container running state requested", data.State);
+            return data.State.Running;
+          }
+          catch (error) {
+            DEBUG && console.log("[docker-mirror] Failed to get running container state", error);
+            throw error;
+          }
+        } else {
+          return false;
+        }
+      },
+      isCreated: function(err, callback) {
+        var container = docker.getContainer(name);
         try {
           var data = Meteor.wrapAsync(container.inspect, container)();
-          DEBUG && console.log("[docker-mirror] Container running state requested", data.State);
-          return data.State.Running;
+          DEBUG && console.log("[docker-mirror] Container created state requested", data.State);
+          return true;
         }
         catch (error) {
           if(error.message.indexOf("404") > -1) {
-            DEBUG && console.log("[docker-mirror] Container is not running");
+            DEBUG && console.log("[docker-mirror] Container is not created");
             return false;
           } else {
             throw error;
           }
         }
       },
-      spawn: function() {
+      spawn: function(spawnOptions) {
+        var cwd = spawnOptions.options.cwd;
+        var mongoUrl = spawnOptions.options.env.MONGO_URL;
+        console.log("SPAWNING WITH ", cwd, mongoUrl);
         try {
-          var container = Meteor.wrapAsync(docker.createContainer, docker)({Image: "velocity-mirror", name: name});
+          var container = Meteor.wrapAsync(docker.createContainer, docker)({
+            Image: "velocity-mirror",
+            Cmd: ["meteor"],
+            name: name,
+          });
           try {
-            var data = Meteor.wrapAsync(container.start, container)();
+            var data = Meteor.wrapAsync(container.start, container)({
+              Binds: [cwd + ":/app"],
+              Env: ["MONGO_URL=" + mongoUrl]
+            });
             DEBUG && console.log("[docker-mirror] Container started", data);
           }
           catch (error) {
